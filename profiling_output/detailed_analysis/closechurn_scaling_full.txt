@@ -18,7 +18,7 @@ Completed 2000 requests
 Finished 2000 requests
 
 
-Server Software:        
+Server Software:
 Server Hostname:        127.0.0.1
 Server Port:            18095
 
@@ -74,7 +74,7 @@ Completed 2000 requests
 Finished 2000 requests
 
 
-Server Software:        
+Server Software:
 Server Hostname:        127.0.0.1
 Server Port:            18095
 
@@ -130,7 +130,7 @@ Completed 2000 requests
 Finished 2000 requests
 
 
-Server Software:        
+Server Software:
 Server Hostname:        127.0.0.1
 Server Port:            18095
 
@@ -185,4 +185,3 @@ Licensed to The Apache Software Foundation, http://www.apache.org/
 
 Benchmarking 127.0.0.1 (be patient)
 apr_socket_recv: Connection refused (111)
-
