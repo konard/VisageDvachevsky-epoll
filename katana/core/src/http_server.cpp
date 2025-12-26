@@ -283,6 +283,13 @@ void server::accept_connection(reactor& r,
                                std::vector<std::unique_ptr<connection_state>>& connections) {
     auto accept_result = listener.accept();
     if (!accept_result) {
+        // Log temporary accept errors but don't treat them as fatal.
+        // The listener remains registered and will retry on next epoll wakeup.
+        auto err = accept_result.error().value();
+        if (err != EAGAIN && err != EWOULDBLOCK && conn_debug_enabled()) {
+            std::cerr << "[conn_debug] accept failed: errno=" << err << " (" << std::strerror(err)
+                      << ")\n";
+        }
         return;
     }
 
@@ -311,9 +318,18 @@ int server::run() {
             int fd = ::accept4(listener_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (fd < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    // No more pending connections (edge-triggered)
                     break;
                 }
-                return;
+                // Temporary errors (EMFILE, ENOMEM, ENOBUFS, etc.) should NOT
+                // permanently exit the accept loop. Log the error and continue
+                // accepting - the kernel will retry on next epoll wakeup.
+                if (conn_debug_enabled()) {
+                    std::cerr << "[conn_debug] accept4 failed: errno=" << errno << " ("
+                              << std::strerror(errno) << ")\n";
+                }
+                // Break instead of return to keep the listener alive
+                break;
             }
 
             auto state = std::make_shared<connection_state>(tcp_socket(fd));
