@@ -1,0 +1,60 @@
+name: Benchmark Results Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    paths:
+      - 'BENCHMARK_RESULTS.md'
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  sync-benchmark-results:
+    name: Sync Benchmark Results to README
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if BENCHMARK_RESULTS.md exists
+        id: check_file
+        run: |
+          if [ -f "BENCHMARK_RESULTS.md" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "BENCHMARK_RESULTS.md found"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "BENCHMARK_RESULTS.md not found"
+          fi
+
+      - name: Update README from benchmark results
+        if: steps.check_file.outputs.exists == 'true'
+        run: |
+          if [ -f "scripts/update_readme_from_bench.py" ]; then
+            python3 scripts/update_readme_from_bench.py
+          else
+            echo "Warning: scripts/update_readme_from_bench.py not found, skipping README update"
+          fi
+
+      - name: Commit and push changes
+        if: steps.check_file.outputs.exists == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: sync README with benchmark results"
+          git push
