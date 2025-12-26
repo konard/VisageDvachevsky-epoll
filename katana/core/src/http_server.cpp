@@ -164,8 +164,8 @@ void log_accept_error(int err) {
 } // namespace
 
 void server::handle_connection(connection_state& state, [[maybe_unused]] reactor& r) {
-    // DEBUG: Track iterations
-    static thread_local int iter_count = 0;
+    // DEBUG: Track iterations (used in DEBUG_LOG when enabled)
+    [[maybe_unused]] static thread_local int iter_count = 0;
     ++iter_count;
     DEBUG_LOG("[DEBUG] handle_connection iter=%d write_buf_empty=%d read_buf_empty=%d\n",
               iter_count,
@@ -320,7 +320,8 @@ void server::handle_connection(connection_state& state, [[maybe_unused]] reactor
 
         resp.serialize_into(state.write_buffer);
 
-        size_t total_sent = 0;
+        // Used in DEBUG_LOG when enabled
+        [[maybe_unused]] size_t total_sent = 0;
         while (!state.write_buffer.empty()) {
             auto data = state.write_buffer.readable_span();
             auto write_result = state.socket.write(data);
