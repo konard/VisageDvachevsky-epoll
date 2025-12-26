@@ -18,6 +18,7 @@ struct reactor_pool_config {
     size_t max_pending_tasks = 65536;
     bool enable_adaptive_balancing = true;
     bool enable_thread_pinning = false;
+    int32_t listen_backlog = 1024; // Backlog for listener sockets (capped by net.core.somaxconn)
 };
 
 class reactor_pool {
@@ -130,7 +131,7 @@ public:
     template <typename AcceptHandler>
     result<void> start_listening(uint16_t port, AcceptHandler&& handler) {
         for (auto& ctx : reactors_) {
-            auto listener_fd = create_listener_socket_reuseport(port);
+            auto listener_fd = create_listener_socket_reuseport(port, config_.listen_backlog);
             if (listener_fd < 0) {
                 return std::unexpected(std::error_code(errno, std::system_category()));
             }
@@ -159,7 +160,7 @@ private:
 
     void worker_thread(reactor_context* ctx);
 
-    static int32_t create_listener_socket_reuseport(uint16_t port);
+    static int32_t create_listener_socket_reuseport(uint16_t port, int32_t backlog);
 
     std::vector<std::unique_ptr<reactor_context>> reactors_;
     reactor_pool_config config_;

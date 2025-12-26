@@ -144,6 +144,38 @@ Transfer/sec:     42.15MB
 | P99.9 Latency | < 20ms | Under normal load |
 | Max Connections | > 10k | Concurrent connections |
 
+## Connection: close Mode Test
+
+This test specifically verifies the fix for issue #1 - the accept loop bug that
+caused ECONNREFUSED under high connection churn.
+
+### Using Python script
+```bash
+# Start the server with debug logging
+KATANA_CONN_DEBUG=1 ./compute_api &
+
+# Run the close mode test
+python3 close_mode_test.py --threads 16 --duration 10
+```
+
+### Using wrk
+```bash
+# Connection: close test with wrk
+wrk -t4 -c100 -d10s -s scripts/close_mode.lua http://localhost:8080/
+```
+
+### Success Criteria
+- No ECONNREFUSED errors (was the main symptom of the bug)
+- Server continues accepting connections throughout the test
+- Error rate below 1%
+
+### Debugging
+Enable detailed logging:
+```bash
+export KATANA_CONN_DEBUG=1
+```
+This will show accept errors with errno values.
+
 ## Custom Lua Scripts
 
 See the `scripts/` directory for example Lua scripts for wrk.

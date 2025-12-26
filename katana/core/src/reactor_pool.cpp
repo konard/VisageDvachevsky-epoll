@@ -128,7 +128,7 @@ void reactor_pool::worker_thread(reactor_context* ctx) {
     }
 }
 
-int32_t reactor_pool::create_listener_socket_reuseport(uint16_t port) {
+int32_t reactor_pool::create_listener_socket_reuseport(uint16_t port, int32_t backlog) {
     int32_t fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     if (fd < 0) {
         return -1;
@@ -148,7 +148,8 @@ int32_t reactor_pool::create_listener_socket_reuseport(uint16_t port) {
         return -1;
     }
 
-    if (listen(fd, 8192) < 0) {
+    // Use provided backlog (will be capped by net.core.somaxconn by kernel)
+    if (listen(fd, backlog) < 0) {
         close(fd);
         return -1;
     }

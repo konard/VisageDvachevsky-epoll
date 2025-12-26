@@ -4,8 +4,10 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdlib>
+#include <fcntl.h>
 #include <iostream>
 #include <sys/socket.h>
+#include <unistd.h>
 
 // Debug logging disabled for performance
 #define DEBUG_LOG(fmt, ...)                                                                        \
@@ -16,6 +18,10 @@ namespace katana {
 namespace http {
 
 namespace {
+
+// =============================================================================
+// Connection close counters (for debugging/metrics)
+// =============================================================================
 struct conn_close_counters {
     std::atomic<uint64_t> read_error{0};
     std::atomic<uint64_t> read_eof{0};
@@ -29,6 +35,101 @@ conn_close_counters& close_counters() {
     return counters;
 }
 
+// =============================================================================
+// Accept error counters (for tracking resilience under load)
+// =============================================================================
+struct accept_error_counters {
+    std::atomic<uint64_t> emfile{0};    // Per-process FD limit
+    std::atomic<uint64_t> enfile{0};    // System-wide FD limit
+    std::atomic<uint64_t> enomem{0};    // Out of memory
+    std::atomic<uint64_t> enobufs{0};   // No buffer space
+    std::atomic<uint64_t> other{0};     // Other errors
+    std::atomic<uint64_t> recovered{0}; // EMFILE recoveries via reserve FD
+};
+
+accept_error_counters& accept_counters() {
+    static accept_error_counters counters;
+    return counters;
+}
+
+void count_accept_error(int err) {
+    switch (err) {
+    case EMFILE:
+        accept_counters().emfile.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ENFILE:
+        accept_counters().enfile.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ENOMEM:
+        accept_counters().enomem.fetch_add(1, std::memory_order_relaxed);
+        break;
+    case ENOBUFS:
+        accept_counters().enobufs.fetch_add(1, std::memory_order_relaxed);
+        break;
+    default:
+        accept_counters().other.fetch_add(1, std::memory_order_relaxed);
+        break;
+    }
+}
+
+// =============================================================================
+// Reserve FD for EMFILE resilience
+// =============================================================================
+// This is a classic pattern: hold a reserve file descriptor open to /dev/null.
+// When accept() fails with EMFILE (per-process FD limit reached), we:
+// 1. Close the reserve FD (now we have 1 FD available)
+// 2. Accept and immediately close one connection (drains backlog, prevents storm)
+// 3. Reopen the reserve FD
+// This prevents the accept loop from being permanently stuck when at FD limit.
+class reserve_fd_guard {
+public:
+    reserve_fd_guard() { reopen(); }
+    ~reserve_fd_guard() {
+        if (fd_ >= 0) {
+            ::close(fd_);
+        }
+    }
+
+    reserve_fd_guard(const reserve_fd_guard&) = delete;
+    reserve_fd_guard& operator=(const reserve_fd_guard&) = delete;
+
+    // Handle EMFILE: use reserve FD slot to accept+close one connection
+    // Returns true if recovery was performed
+    bool handle_emfile(int listener_fd) {
+        if (fd_ < 0) {
+            return false;
+        }
+        // Close reserve to free one FD slot
+        ::close(fd_);
+        fd_ = -1;
+
+        // Accept and immediately close (drains backlog, signals client)
+        int conn_fd = ::accept4(listener_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        if (conn_fd >= 0) {
+            ::close(conn_fd);
+        }
+
+        // Reopen reserve FD
+        reopen();
+        accept_counters().recovered.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+private:
+    void reopen() { fd_ = ::open("/dev/null", O_RDONLY | O_CLOEXEC); }
+
+    int fd_{-1};
+};
+
+// Thread-local reserve FD (one per reactor/worker thread)
+reserve_fd_guard& get_reserve_fd() {
+    static thread_local reserve_fd_guard guard;
+    return guard;
+}
+
+// =============================================================================
+// Debug logging
+// =============================================================================
 bool conn_debug_enabled() {
     static bool enabled = std::getenv("KATANA_CONN_DEBUG") != nullptr;
     return enabled;
@@ -42,6 +143,24 @@ void maybe_log_close(const char* reason, uint64_t count) {
         std::cerr << "[conn_debug] close " << reason << " count=" << count << "\n";
     }
 }
+
+void log_accept_error(int err) {
+    if (!conn_debug_enabled()) {
+        return;
+    }
+    auto& c = accept_counters();
+    // Log first 10, then every 100, then every 1000
+    uint64_t total =
+        c.emfile.load(std::memory_order_relaxed) + c.enfile.load(std::memory_order_relaxed) +
+        c.enomem.load(std::memory_order_relaxed) + c.enobufs.load(std::memory_order_relaxed) +
+        c.other.load(std::memory_order_relaxed);
+    if (total <= 10 || (total <= 100 && total % 10 == 0) || total % 100 == 0) {
+        std::cerr << "[conn_debug] accept4 failed: errno=" << err << " (" << std::strerror(err)
+                  << ") total_errors=" << total
+                  << " recovered=" << c.recovered.load(std::memory_order_relaxed) << "\n";
+    }
+}
+
 } // namespace
 
 void server::handle_connection(connection_state& state, [[maybe_unused]] reactor& r) {
@@ -283,6 +402,13 @@ void server::accept_connection(reactor& r,
                                std::vector<std::unique_ptr<connection_state>>& connections) {
     auto accept_result = listener.accept();
     if (!accept_result) {
+        // Log temporary accept errors but don't treat them as fatal.
+        // The listener remains registered and will retry on next epoll wakeup.
+        auto err = accept_result.error().value();
+        if (err != EAGAIN && err != EWOULDBLOCK && conn_debug_enabled()) {
+            std::cerr << "[conn_debug] accept failed: errno=" << err << " (" << std::strerror(err)
+                      << ")\n";
+        }
         return;
     }
 
@@ -302,18 +428,38 @@ int server::run() {
     reactor_pool_config config;
     config.reactor_count = static_cast<uint32_t>(worker_count_);
     config.enable_adaptive_balancing = true;
+    config.listen_backlog = backlog_;
     reactor_pool pool(config);
 
     std::vector<std::shared_ptr<fd_watch>> accept_watches;
 
     auto accept_handler = [this](reactor& r, int listener_fd) {
+        // Initialize thread-local reserve FD on first use
+        auto& reserve_fd = get_reserve_fd();
+
         while (true) {
             int fd = ::accept4(listener_fd, nullptr, nullptr, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (fd < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                int err = errno;
+                if (err == EAGAIN || err == EWOULDBLOCK) {
+                    // No more pending connections (edge-triggered)
                     break;
                 }
-                return;
+
+                // Track the error for metrics
+                count_accept_error(err);
+                log_accept_error(err);
+
+                // EMFILE resilience: use reserve FD to accept+close one connection
+                // This prevents the accept backlog from staying permanently full
+                if (err == EMFILE) {
+                    reserve_fd.handle_emfile(listener_fd);
+                }
+
+                // Temporary errors (EMFILE, ENOMEM, ENOBUFS, etc.) should NOT
+                // permanently exit the accept loop. Break instead of return
+                // to keep the listener alive for next epoll wakeup.
+                break;
             }
 
             auto state = std::make_shared<connection_state>(tcp_socket(fd));
