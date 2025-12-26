@@ -1,6 +1,6 @@
 // layer: flat
 // Auto-generated router bindings from OpenAPI specification
-//
+// 
 // Performance characteristics:
 //   - Compile-time route parsing (constexpr path_pattern)
 //   - Zero-copy parameter extraction (string_view)
@@ -10,7 +10,7 @@
 //   - Thread-local handler context (reactor-per-core compatible)
 //   - std::from_chars for fastest integer parsing
 //   - Inplace functions (160 bytes SBO, no heap allocation)
-//
+// 
 // Hot path optimizations:
 //   1. Content negotiation: O(1) for */*, single type, or exact match
 //   2. Validation: Only on error path, single allocation
@@ -18,28 +18,27 @@
 //   4. Handler context: RAII scope guard (zero-cost abstraction)
 #pragma once
 
-#include "generated_handlers.hpp"
-#include "generated_json.hpp"
-#include "generated_routes.hpp"
-#include "generated_validators.hpp"
+#include "katana/core/router.hpp"
+#include "katana/core/problem.hpp"
+#include "katana/core/serde.hpp"
 #include "katana/core/handler_context.hpp"
 #include "katana/core/http_server.hpp"
-#include "katana/core/problem.hpp"
-#include "katana/core/router.hpp"
-#include "katana/core/serde.hpp"
+#include "generated_routes.hpp"
+#include "generated_handlers.hpp"
+#include "generated_json.hpp"
+#include "generated_validators.hpp"
 #include <array>
 #include <charconv>
 #include <optional>
+#include <variant>
 #include <span>
 #include <string_view>
-#include <variant>
 
 namespace generated {
 
 inline std::optional<std::string_view> query_param(std::string_view uri, std::string_view key) {
     auto qpos = uri.find('?');
-    if (qpos == std::string_view::npos)
-        return std::nullopt;
+    if (qpos == std::string_view::npos) return std::nullopt;
     auto query = uri.substr(qpos + 1);
     while (!query.empty()) {
         auto amp = query.find('&');
@@ -47,60 +46,47 @@ inline std::optional<std::string_view> query_param(std::string_view uri, std::st
         auto eq = part.find('=');
         auto name = part.substr(0, eq);
         if (name == key) {
-            if (eq == std::string_view::npos)
-                return std::string_view{};
+            if (eq == std::string_view::npos) return std::string_view{};
             return part.substr(eq + 1);
         }
-        if (amp == std::string_view::npos)
-            break;
+        if (amp == std::string_view::npos) break;
         query.remove_prefix(amp + 1);
     }
     return std::nullopt;
 }
 
-inline std::optional<std::string_view> cookie_param(const katana::http::request& req,
-                                                    std::string_view key) {
+inline std::optional<std::string_view> cookie_param(const katana::http::request& req, std::string_view key) {
     auto cookie = req.headers.get(katana::http::field::cookie);
-    if (!cookie)
-        return std::nullopt;
+    if (!cookie) return std::nullopt;
     std::string_view rest = *cookie;
     while (!rest.empty()) {
         auto sep = rest.find(';');
         auto token = rest.substr(0, sep);
-        if (sep != std::string_view::npos)
-            rest.remove_prefix(sep + 1);
+        if (sep != std::string_view::npos) rest.remove_prefix(sep + 1);
         auto eq = token.find('=');
-        if (eq == std::string_view::npos)
-            continue;
+        if (eq == std::string_view::npos) continue;
         auto name = katana::serde::trim_view(token.substr(0, eq));
         auto val = katana::serde::trim_view(token.substr(eq + 1));
-        if (name == key)
-            return val;
-        if (sep == std::string_view::npos)
-            break;
+        if (name == key) return val;
+        if (sep == std::string_view::npos) break;
     }
     return std::nullopt;
 }
 
 inline std::optional<size_t> find_content_type(std::optional<std::string_view> header,
                                                std::span<const content_type_info> allowed) {
-    if (allowed.empty())
-        return std::nullopt;
-    if (!header)
-        return std::nullopt;
+    if (allowed.empty()) return std::nullopt;
+    if (!header) return std::nullopt;
     for (size_t i = 0; i < allowed.size(); ++i) {
         auto& ct = allowed[i];
-        if (header->substr(0, ct.mime_type.size()) == ct.mime_type)
-            return i;
+        if (header->substr(0, ct.mime_type.size()) == ct.mime_type) return i;
     }
     return std::nullopt;
 }
 
-inline std::optional<std::string_view>
-negotiate_response_type(const katana::http::request& req,
-                        std::span<const content_type_info> produces) {
-    if (produces.empty())
-        return std::nullopt;
+inline std::optional<std::string_view> negotiate_response_type(
+    const katana::http::request& req, std::span<const content_type_info> produces) {
+    if (produces.empty()) return std::nullopt;
     auto accept = req.headers.get(katana::http::field::accept);
     // Fast path: no Accept header or */*, return first
     if (!accept || accept->empty() || *accept == "*/*") {
@@ -111,12 +97,10 @@ negotiate_response_type(const katana::http::request& req,
         return produces.front().mime_type;
     }
     // Fast path: common exact matches without quality values
-    if (accept->find(',') == std::string_view::npos &&
-        accept->find(';') == std::string_view::npos) {
+    if (accept->find(',') == std::string_view::npos && accept->find(';') == std::string_view::npos) {
         // Single value without q-factor
         for (auto& ct : produces) {
-            if (ct.mime_type == *accept)
-                return ct.mime_type;
+            if (ct.mime_type == *accept) return ct.mime_type;
         }
     }
     // Slow path: full parsing with quality values and wildcards
@@ -124,18 +108,13 @@ negotiate_response_type(const katana::http::request& req,
     while (!remaining.empty()) {
         auto comma = remaining.find(',');
         auto token = comma == std::string_view::npos ? remaining : remaining.substr(0, comma);
-        if (comma == std::string_view::npos)
-            remaining = {};
-        else
-            remaining = remaining.substr(comma + 1);
+        if (comma == std::string_view::npos) remaining = {};
+        else remaining = remaining.substr(comma + 1);
         token = katana::serde::trim_view(token);
-        if (token.empty())
-            continue;
+        if (token.empty()) continue;
         auto semicolon = token.find(';');
-        if (semicolon != std::string_view::npos)
-            token = katana::serde::trim_view(token.substr(0, semicolon));
-        if (token == "*/*")
-            return produces.front().mime_type;
+        if (semicolon != std::string_view::npos) token = katana::serde::trim_view(token.substr(0, semicolon));
+        if (token == "*/*") return produces.front().mime_type;
         if (token.size() > 2 && token.substr(token.size() - 2) == "/*") {
             auto prefix = token.substr(0, token.size() - 1); // keep trailing '/'
             for (auto& ct : produces) {
@@ -145,8 +124,7 @@ negotiate_response_type(const katana::http::request& req,
             }
         } else {
             for (auto& ct : produces) {
-                if (ct.mime_type == token)
-                    return ct.mime_type;
+                if (ct.mime_type == token) return ct.mime_type;
             }
         }
     }
@@ -161,7 +139,8 @@ inline katana::http::response format_validation_error(const validation_error& er
     error_msg.append(": ");
     error_msg.append(err.message());
     return katana::http::response::error(
-        katana::problem_details::bad_request(std::move(error_msg)));
+        katana::problem_details::bad_request(std::move(error_msg))
+    );
 }
 
 // Hash-based routing optimization (FNV-1a)
@@ -178,31 +157,23 @@ constexpr uint64_t hash_string(std::string_view str) noexcept {
 constexpr uint64_t HASH_REGISTER_USER = hash_string("/user/register");
 
 // Inline dispatch for /user/register
-inline katana::result<katana::http::response> dispatch_register_user(
-    const katana::http::request& req, katana::http::request_context& ctx, api_handler& handler) {
+inline katana::result<katana::http::response> dispatch_register_user(const katana::http::request& req, katana::http::request_context& ctx, api_handler& handler) {
     auto negotiated_response = negotiate_response_type(req, route_0_produces);
     if (!negotiated_response) {
-        return katana::http::response::error(
-            katana::problem_details::not_acceptable("unsupported Accept header"));
+        return katana::http::response::error(katana::problem_details::not_acceptable("unsupported Accept header"));
     }
-    auto matched_ct =
-        find_content_type(req.headers.get(katana::http::field::content_type), route_0_consumes);
-    if (!matched_ct)
-        return katana::http::response::error(
-            katana::problem_details::unsupported_media_type("unsupported Content-Type"));
+    auto matched_ct = find_content_type(req.headers.get(katana::http::field::content_type), route_0_consumes);
+    if (!matched_ct) return katana::http::response::error(katana::problem_details::unsupported_media_type("unsupported Content-Type"));
     std::optional<RegisterUserRequest> parsed_body;
     switch (*matched_ct) {
     case 0: {
         auto candidate = parse_RegisterUserRequest(req.body, &ctx.arena);
-        if (!candidate)
-            return katana::http::response::error(
-                katana::problem_details::bad_request("invalid request body"));
+        if (!candidate) return katana::http::response::error(katana::problem_details::bad_request("invalid request body"));
         parsed_body = std::move(*candidate);
         break;
     }
     default:
-        return katana::http::response::error(
-            katana::problem_details::unsupported_media_type("unsupported Content-Type"));
+        return katana::http::response::error(katana::problem_details::unsupported_media_type("unsupported Content-Type"));
     }
 
     // Automatic validation (optimized: single allocation)
@@ -219,55 +190,43 @@ inline katana::result<katana::http::response> dispatch_register_user(
 }
 
 inline const katana::http::router& make_router(api_handler& handler) {
-    using katana::http::handler_fn;
-    using katana::http::path_pattern;
     using katana::http::route_entry;
+    using katana::http::path_pattern;
+    using katana::http::handler_fn;
     static std::array<route_entry, route_count> route_entries = {
-        route_entry{
-            katana::http::method::post,
-            katana::http::path_pattern::from_literal<"/user/register">(),
-            handler_fn(
-                [&handler](const katana::http::request& req, katana::http::request_context& ctx)
-                    -> katana::result<katana::http::response> {
-                    auto negotiated_response = negotiate_response_type(req, route_0_produces);
-                    if (!negotiated_response) {
-                        return katana::http::response::error(
-                            katana::problem_details::not_acceptable("unsupported Accept header"));
-                    }
-                    auto matched_ct = find_content_type(
-                        req.headers.get(katana::http::field::content_type), route_0_consumes);
-                    if (!matched_ct)
-                        return katana::http::response::error(
-                            katana::problem_details::unsupported_media_type(
-                                "unsupported Content-Type"));
-                    std::optional<RegisterUserRequest> parsed_body;
-                    switch (*matched_ct) {
-                    case 0: {
-                        auto candidate = parse_RegisterUserRequest(req.body, &ctx.arena);
-                        if (!candidate)
-                            return katana::http::response::error(
-                                katana::problem_details::bad_request("invalid request body"));
-                        parsed_body = std::move(*candidate);
-                        break;
-                    }
-                    default:
-                        return katana::http::response::error(
-                            katana::problem_details::unsupported_media_type(
-                                "unsupported Content-Type"));
-                    }
-                    // Automatic validation (optimized: single allocation)
-                    if (auto validation_error = validate_RegisterUserRequest(*parsed_body)) {
-                        return format_validation_error(*validation_error);
-                    }
-                    // Set handler context for zero-boilerplate access
-                    katana::http::handler_context::scope context_scope(req, ctx);
-                    auto generated_response = handler.register_user(*parsed_body);
-                    if (negotiated_response &&
-                        !generated_response.headers.get(katana::http::field::content_type)) {
-                        generated_response.set_header("Content-Type", *negotiated_response);
-                    }
-                    return generated_response;
-                })},
+        route_entry{katana::http::method::post,
+                   katana::http::path_pattern::from_literal<"/user/register">(),
+                   handler_fn([&handler](const katana::http::request& req, katana::http::request_context& ctx) -> katana::result<katana::http::response> {
+                       auto negotiated_response = negotiate_response_type(req, route_0_produces);
+                       if (!negotiated_response) {
+                           return katana::http::response::error(katana::problem_details::not_acceptable("unsupported Accept header"));
+                       }
+                       auto matched_ct = find_content_type(req.headers.get(katana::http::field::content_type), route_0_consumes);
+                       if (!matched_ct) return katana::http::response::error(katana::problem_details::unsupported_media_type("unsupported Content-Type"));
+                       std::optional<RegisterUserRequest> parsed_body;
+                       switch (*matched_ct) {
+                       case 0: {
+                           auto candidate = parse_RegisterUserRequest(req.body, &ctx.arena);
+                           if (!candidate) return katana::http::response::error(katana::problem_details::bad_request("invalid request body"));
+                           parsed_body = std::move(*candidate);
+                           break;
+                       }
+                       default:
+                           return katana::http::response::error(katana::problem_details::unsupported_media_type("unsupported Content-Type"));
+                       }
+                       // Automatic validation (optimized: single allocation)
+                       if (auto validation_error = validate_RegisterUserRequest(*parsed_body)) {
+                           return format_validation_error(*validation_error);
+                       }
+                       // Set handler context for zero-boilerplate access
+                       katana::http::handler_context::scope context_scope(req, ctx);
+                       auto generated_response = handler.register_user(*parsed_body);
+                       if (negotiated_response && !generated_response.headers.get(katana::http::field::content_type)) {
+                           generated_response.set_header("Content-Type", *negotiated_response);
+                       }
+                       return generated_response;
+                   })
+        },
     };
     static katana::http::router router_instance(route_entries);
     return router_instance;
@@ -279,8 +238,9 @@ public:
     explicit fast_router(api_handler& handler, const katana::http::router& fallback)
         : handler_(handler), fallback_router_(fallback) {}
 
-    katana::result<katana::http::response> operator()(const katana::http::request& req,
-                                                      katana::http::request_context& ctx) const {
+    katana::result<katana::http::response> operator()(
+        const katana::http::request& req,
+        katana::http::request_context& ctx) const {
         // Strip query string for matching
         std::string_view path = req.uri;
         auto query_pos = path.find('?');
@@ -291,14 +251,15 @@ public:
         // Fast path: O(1) hash-based dispatch for static routes
         uint64_t path_hash = hash_string(path);
         switch (path_hash) {
-        case HASH_REGISTER_USER:
-            if (path == "/user/register" && req.http_method == katana::http::method::post) {
-                // Hash matched, path matched, method matched - inline dispatch!
-                return dispatch_register_user(req, ctx, handler_);
-            }
-            break;
-        default:
-            break;
+            case HASH_REGISTER_USER:
+                if (path == "/user/register" && 
+                    req.http_method == katana::http::method::post) {
+                    // Hash matched, path matched, method matched - inline dispatch!
+                    return dispatch_register_user(req, ctx, handler_);
+                }
+                break;
+            default:
+                break;
         }
 
         // Fallback to standard router for:
@@ -320,13 +281,15 @@ inline fast_router make_fast_router(api_handler& handler) {
 
 // Zero-boilerplate server creation
 // Usage: return generated::serve<MyHandler>(8080);
-template <typename Handler, typename... Args> inline auto make_server(Args&&... args) {
+template<typename Handler, typename... Args>
+inline auto make_server(Args&&... args) {
     static Handler handler_instance{std::forward<Args>(args)...};
     const auto& router = make_router(handler_instance);
     return katana::http::server(router);
 }
 
-template <typename Handler, typename... Args> inline int serve(uint16_t port, Args&&... args) {
+template<typename Handler, typename... Args>
+inline int serve(uint16_t port, Args&&... args) {
     return make_server<Handler>(std::forward<Args>(args)...)
         .listen(port)
         .workers(4)
