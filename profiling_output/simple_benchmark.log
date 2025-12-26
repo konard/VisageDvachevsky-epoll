@@ -1,0 +1,63 @@
+=== KATANA Framework - Benchmark Suite ===
+Target: 127.0.0.1:18091
+Output: profiling_output/baseline_benchmark.md
+Hardware concurrency: 6 cores
+
+[1/9] Measuring latency distribution...
+[2/9] Measuring keep-alive throughput...
+[3/9] Evaluating HTTP parsing overhead...
+[4/9] Measuring throughput at 1 threads...
+[5/9] Measuring throughput at 4 threads...
+[6/9] Measuring throughput at 8 threads...
+[7/9] Measuring connection churn (close-after-each)...
+[8/9] Exploring connection fan-out...
+[9/9] Running sustained stress test...
+
+
+=== Core Performance ===
+  Latency samples                               354927.000 samples
+  Latency avg                                        0.045 ms
+  Latency p50                                        0.033 ms
+  Latency p90                                        0.074 ms
+  Latency p95                                        0.092 ms
+  Latency p99                                        0.149 ms
+  Latency p999                                       0.311 ms
+  Latency IQR                                        0.021 ms
+  Latency max                                        3.248 ms
+  Keep-alive throughput                          35541.897 req/s
+  Keep-alive success                              4996.000 requests
+
+=== HTTP Parsing ===
+  Minimal request samples                         1500.000 samples
+  Minimal request p50                                0.024 ms
+  Minimal request p99                                0.035 ms
+  Medium request samples                          1500.000 samples
+  Medium request p50                                 0.032 ms
+  Medium request p99                                 0.048 ms
+  Large headers samples                           1500.000 samples
+  Large headers p50                                  0.040 ms
+  Large headers p99                                  0.058 ms
+
+=== Scalability ===
+  Throughput with 1 threads                      36056.000 req/s
+  Throughput with 4 threads                     118202.000 req/s
+  Throughput with 8 threads                     178621.000 req/s
+
+=== Connection Churn ===
+  Close-after-each-request throughput (4 threads)   15758.667 req/s
+
+=== Scalability ===
+  32 concurrent connections                     189160.000 req/s
+  64 concurrent connections                     182770.000 req/s
+  128 concurrent connections                    190020.400 req/s
+  256 concurrent connections                    192534.000 req/s
+
+=== Stability ===
+  Sustained throughput                               0.000 req/s
+  Total requests                                     0.000 requests
+
+=== System Configuration ===
+  FD soft limit                                1048576.000 fds
+  FD hard limit                                1048576.000 fds
+
+✅ Benchmark complete! Results saved to profiling_output/baseline_benchmark.md
