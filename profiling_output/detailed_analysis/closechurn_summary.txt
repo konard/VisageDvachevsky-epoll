@@ -1,0 +1,16 @@
+=== Close-Churn Scaling Summary ===
+Concurrency Level:      1
+Failed requests:        0
+Requests per second:    11291.59 [#/sec] (mean)
+Time per request:       0.089 [ms] (mean)
+Time per request:       0.089 [ms] (mean, across all concurrent requests)
+Concurrency Level:      4
+Failed requests:        0
+Requests per second:    17071.55 [#/sec] (mean)
+Time per request:       0.234 [ms] (mean)
+Time per request:       0.059 [ms] (mean, across all concurrent requests)
+Concurrency Level:      8
+Failed requests:        0
+Requests per second:    13307.96 [#/sec] (mean)
+Time per request:       0.601 [ms] (mean)
+Time per request:       0.075 [ms] (mean, across all concurrent requests)

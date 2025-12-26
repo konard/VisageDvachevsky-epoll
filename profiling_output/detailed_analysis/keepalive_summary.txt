@@ -1,0 +1,16 @@
+=== Keep-Alive Scaling Summary ===
+Concurrency Level:      1
+Failed requests:        0
+Requests per second:    10156.16 [#/sec] (mean)
+Time per request:       0.098 [ms] (mean)
+Time per request:       0.098 [ms] (mean, across all concurrent requests)
+Concurrency Level:      4
+Failed requests:        0
+Requests per second:    15400.35 [#/sec] (mean)
+Time per request:       0.260 [ms] (mean)
+Time per request:       0.065 [ms] (mean, across all concurrent requests)
+Concurrency Level:      8
+Failed requests:        0
+Requests per second:    16950.99 [#/sec] (mean)
+Time per request:       0.472 [ms] (mean)
+Time per request:       0.059 [ms] (mean, across all concurrent requests)
